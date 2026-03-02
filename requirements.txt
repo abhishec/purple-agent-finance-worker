@@ -1,0 +1,10 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+anthropic>=0.34
+httpx>=0.27
+pydantic>=2.0
+boto3>=1.34          # S3 training data download
+scipy>=1.11          # finance math: stats, optimize, integrate (ACE library-aware sandbox)
+numpy>=1.26          # array operations, linear algebra (ACE sandbox)
+pandas>=2.0          # data manipulation, CSV processing (ACE sandbox)
+sympy>=1.12          # symbolic math, exact arithmetic (ACE sandbox)
