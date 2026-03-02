@@ -93,6 +93,21 @@ jobs:
             && echo "✅ Pushed to public ECR: public.ecr.aws/d9m7h3k5/agentbench-finance:latest" \
             || echo "⚠️ Public ECR push failed (private ECR push succeeded)"
 
+      - name: Build A2A Docker image (OfficeQA submission)
+        run: |
+          docker build --no-cache --platform linux/amd64 \
+            -f Dockerfile.a2a \
+            -t ${{ env.ECR_REPO }}-a2a:latest .
+          echo "✅ A2A image built"
+
+      - name: Push A2A image to public ECR
+        run: |
+          docker tag ${{ env.ECR_REPO }}-a2a:latest \
+            ${{ env.PUBLIC_ECR_REGISTRY }}/${{ env.PUBLIC_ECR_REPO }}-a2a:latest
+          docker push ${{ env.PUBLIC_ECR_REGISTRY }}/${{ env.PUBLIC_ECR_REPO }}-a2a:latest \
+            && echo "✅ A2A image pushed: public.ecr.aws/d9m7h3k5/agentbench-finance-a2a:latest" \
+            || echo "⚠️ A2A public ECR push failed"
+
   # ─────────────────────────────────────────────
   # JOB 2: Deploy to ECS
   # ─────────────────────────────────────────────
