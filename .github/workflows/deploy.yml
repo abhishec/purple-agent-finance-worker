@@ -11,6 +11,7 @@ on:
       - 'main.py'
       - 'requirements.txt'
       - 'Dockerfile'
+      - 'Dockerfile.a2a'
       - '.github/workflows/deploy.yml'
 
   workflow_dispatch:
