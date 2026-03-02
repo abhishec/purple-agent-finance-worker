@@ -96,8 +96,9 @@ class A2AAgent:
 
     def _call_claude(self) -> str:
         """Synchronous Claude API call."""
+        model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
         response = self.client.messages.create(
-            model="claude-sonnet-4-6",
+            model=model,
             max_tokens=MAX_TOKENS,
             system=SYSTEM_PROMPT,
             messages=self.history,
