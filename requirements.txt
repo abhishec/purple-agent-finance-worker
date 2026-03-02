@@ -8,3 +8,4 @@ scipy>=1.11          # finance math: stats, optimize, integrate (ACE library-awa
 numpy>=1.26          # array operations, linear algebra (ACE sandbox)
 pandas>=2.0          # data manipulation, CSV processing (ACE sandbox)
 sympy>=1.12          # symbolic math, exact arithmetic (ACE sandbox)
+a2a-sdk[http-server]>=0.3.20  # A2A protocol for AgentBeats leaderboard assessment
