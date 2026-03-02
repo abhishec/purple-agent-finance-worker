@@ -1,0 +1,23 @@
+# Secrets
+.env
+
+# Runtime data (written by agent at /app in Docker)
+case_log.json
+knowledge_base.json
+entity_memory.json
+knowledge_growth.log
+capability_store.json
+capability_graph.json
+synthesized_definitions.json
+tool_registry.json
+strategy_bandit.json
+.training_seeded
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# macOS
+.DS_Store
