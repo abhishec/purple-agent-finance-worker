@@ -18,7 +18,7 @@ SYSTEM_PROMPT = """You are a highly capable financial analysis and trading agent
 - Options and derivatives trading decisions (pricing, Greeks, strategies)
 - Cryptocurrency trading and market analysis
 - Risk classification and portfolio risk management
-- Treasury operations and fixed income analysis
+- Treasury operations and fixed income analysis (US Treasury bulletins, government spending)
 - Business financial summaries and consistency checks
 - Quantitative finance calculations (amortization, NPV, IRR, Black-Scholes)
 - Data integration across financial datasets
@@ -30,8 +30,15 @@ When given a task:
 4. For trading decisions, include rationale, risk considerations, and confidence
 5. For document analysis, extract key metrics and flag anomalies
 
+CRITICAL OUTPUT FORMAT:
+- Always end your response with your final answer wrapped in FINAL_ANSWER tags
+- Format: <FINAL_ANSWER>your answer here</FINAL_ANSWER>
+- For numerical answers: provide the number only (e.g. <FINAL_ANSWER>507</FINAL_ANSWER>)
+- For yes/no questions: <FINAL_ANSWER>Yes</FINAL_ANSWER> or <FINAL_ANSWER>No</FINAL_ANSWER>
+- Always include FINAL_ANSWER tags even if uncertain — give your best estimate
+
 Always be precise with numbers, cite sources when analyzing documents, and
-structure outputs clearly (JSON when format is specified)."""
+structure outputs clearly."""
 
 MAX_TOKENS = 4096
 MAX_TURNS = 20
@@ -90,7 +97,7 @@ class A2AAgent:
     def _call_claude(self) -> str:
         """Synchronous Claude API call."""
         response = self.client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-sonnet-4-6",
             max_tokens=MAX_TOKENS,
             system=SYSTEM_PROMPT,
             messages=self.history,
