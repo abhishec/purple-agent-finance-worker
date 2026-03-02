@@ -1,7 +1,7 @@
 name: Deploy Finance Agent
 
 # Finance Mini AI Worker — AgentX Phase 2 Finance Track competition entry.
-# Builds Docker image, pushes to public ECR for benchmark submission.
+# Builds Docker image, pushes to private ECR + public ECR, deploys to ECS.
 
 on:
   push:
@@ -14,11 +14,23 @@ on:
       - '.github/workflows/deploy.yml'
 
   workflow_dispatch:
+    inputs:
+      skip_build:
+        description: 'Skip Docker build (just redeploy ECS from existing ECR image)'
+        required: false
+        default: false
+        type: boolean
 
 env:
   AWS_REGION: us-east-1
+  ECR_REGISTRY: 848269696611.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REPO: agentbench-finance
   PUBLIC_ECR_REGISTRY: public.ecr.aws/d9m7h3k5
   PUBLIC_ECR_REPO: agentbench-finance
+  ECS_CLUSTER: nexusbrain-training
+  ECS_SERVICE: agentbench-finance
+  ECS_TASK_DEF: agentbench-finance:2
+  FINANCE_URL: https://finance.agentbench.usebrainos.com
 
 permissions:
   id-token: write
@@ -31,6 +43,9 @@ jobs:
   build:
     name: Build + Push Image
     runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.skip_build != 'true' }}
+    outputs:
+      image_digest: ${{ steps.push.outputs.digest }}
 
     steps:
       - name: Checkout
@@ -42,31 +57,97 @@ jobs:
           role-to-assume: arn:aws:iam::848269696611:role/agentbench-github-deploy
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Login to private ECR
+        run: |
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} \
+            | docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}
+
       - name: Login to public ECR
         run: |
           aws ecr-public get-login-password --region us-east-1 \
-            | docker login --username AWS --password-stdin public.ecr.aws
-          echo "✅ Logged in to public ECR"
+            | docker login --username AWS --password-stdin public.ecr.aws \
+            || echo "⚠️ Public ECR login failed — will skip public push"
 
       - name: Build Docker image
         run: |
           docker build --no-cache --platform linux/amd64 \
-            -t ${{ env.PUBLIC_ECR_REPO }}:latest .
-          echo "✅ Image built: ${{ env.PUBLIC_ECR_REPO }}:latest"
+            -t ${{ env.ECR_REPO }}:latest .
+          echo "✅ Image built"
+
+      - name: Tag and push to private ECR
+        id: push
+        run: |
+          docker tag ${{ env.ECR_REPO }}:latest \
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO }}:latest
+          docker push ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO }}:latest
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' \
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPO }}:latest 2>/dev/null || echo "")
+          echo "digest=$DIGEST" >> $GITHUB_OUTPUT
+          echo "✅ Pushed to private ECR"
 
       - name: Push to public ECR (competition submission)
         run: |
-          docker tag ${{ env.PUBLIC_ECR_REPO }}:latest \
+          docker tag ${{ env.ECR_REPO }}:latest \
             ${{ env.PUBLIC_ECR_REGISTRY }}/${{ env.PUBLIC_ECR_REPO }}:latest
-          docker push ${{ env.PUBLIC_ECR_REGISTRY }}/${{ env.PUBLIC_ECR_REPO }}:latest
-          echo "✅ Pushed: public.ecr.aws/d9m7h3k5/agentbench-finance:latest"
+          docker push ${{ env.PUBLIC_ECR_REGISTRY }}/${{ env.PUBLIC_ECR_REPO }}:latest \
+            && echo "✅ Pushed to public ECR: public.ecr.aws/d9m7h3k5/agentbench-finance:latest" \
+            || echo "⚠️ Public ECR push failed (private ECR push succeeded)"
 
-      - name: Summary
+  # ─────────────────────────────────────────────
+  # JOB 2: Deploy to ECS
+  # ─────────────────────────────────────────────
+  deploy:
+    name: Deploy → ECS
+    runs-on: ubuntu-latest
+    needs: build
+    if: always() && (needs.build.result == 'success' || needs.build.result == 'skipped')
+
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::848269696611:role/agentbench-github-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Force deploy ECS service
         run: |
-          echo "### Finance Agent Docker Image" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "docker pull public.ecr.aws/d9m7h3k5/agentbench-finance:latest" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Submission Docker Image:** \`public.ecr.aws/d9m7h3k5/agentbench-finance:latest\`" >> $GITHUB_STEP_SUMMARY
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.ECS_SERVICE }} \
+            --task-definition ${{ env.ECS_TASK_DEF }} \
+            --force-new-deployment \
+            --query 'service.serviceName' --output text
+          echo "🚀 Finance deployment triggered (task-def: ${{ env.ECS_TASK_DEF }})"
+
+      - name: Wait for service to stabilize
+        run: |
+          echo "Waiting for ECS service to stabilize..."
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }}
+          echo "✅ Finance service stable"
+
+      - name: Health check
+        run: |
+          sleep 20
+          for i in 1 2 3 4 5; do
+            R=$(curl -sf ${{ env.FINANCE_URL }}/health 2>/dev/null || echo "")
+            if echo "$R" | grep -q '"status":"ok"'; then
+              echo "✅ Finance healthy: $R"
+              exit 0
+            fi
+            echo "[$i] not ready, waiting 15s..."
+            sleep 15
+          done
+          echo "❌ Health check failed"
+          exit 1
+
+      - name: Verify agent card
+        run: |
+          CARD=$(curl -sf ${{ env.FINANCE_URL }}/.well-known/agent-card.json)
+          VERSION=$(echo "$CARD" | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])")
+          URL=$(echo "$CARD" | python3 -c "import json,sys; print(json.load(sys.stdin)['url'])")
+          echo "version=$VERSION  url=$URL"
+          [ "$URL" = "${{ env.FINANCE_URL }}" ] \
+            && echo "✅ Agent card correct" \
+            || echo "⚠️ URL mismatch: $URL (expected ${{ env.FINANCE_URL }})"
