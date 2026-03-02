@@ -36,7 +36,7 @@ if os.path.exists(_ENV_FILE):
             if line and not line.startswith("#") and "=" in line:
                 k, _, v = line.partition("=")
                 if v and "PASTE_YOUR_KEY_HERE" not in v:
-                    os.environ.setdefault(k.strip(), v.strip())
+                    os.environ[k.strip()] = v.strip()   # always override (setdefault skips empty)
 
 if not os.environ.get("ANTHROPIC_API_KEY"):
     print("ERROR: Set ANTHROPIC_API_KEY in .env first")

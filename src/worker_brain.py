@@ -61,6 +61,138 @@ from src.autonomous_capability_engine import (
 )
 
 
+# ── Format Normalization Helpers ───────────────────────────────────────────────
+# These run AFTER all quality gates (MoA / self-reflection / compute verifier).
+# MoA/reflection can rewrite a correctly-formatted answer back into prose.
+# This step is the last line of defence: re-extract and re-wrap into required shape.
+
+_FORMAT_TEMPLATES: dict[str, str] = {
+    "json_risk_classification":
+        '{"risk_classification": ["Category1", "Category2"]}',
+    "json_business_summary":
+        '{"business_summary": {"industry": "...", "products": "...", "geography": "..."}}',
+    "json_consistency_check":
+        '{"consistency_check": ["exact risk phrase 1", "exact risk phrase 2"]}',
+    "json_trading_decision": (
+        '{"action": "BUY", "size": 0.1, "stop_loss": 46500.0, '
+        '"take_profit": 48000.0, "reasoning": "brief reason", "confidence": 0.7}'
+    ),
+    "json_cot_answer":
+        '{"cot": "step-by-step reasoning here", "answer": "final answer here"}',
+    "json_options": (
+        '{"result": {"price": 0.0, "greeks": {"delta": 0.0, "gamma": 0.0, '
+        '"theta": 0.0, "vega": 0.0}, "assessment": "fairly priced"}}'
+    ),
+    # json_generic template is extracted from task_text at runtime (see _normalize_to_format)
+    "json_generic": "__from_task__",
+}
+
+# Marker string whose presence means "answer already has correct format — skip normalization"
+_FORMAT_ALREADY_OK: dict[str, str | None] = {
+    "json_risk_classification": '"risk_classification"',
+    "json_business_summary":    '"business_summary"',
+    "json_consistency_check":   '"consistency_check"',
+    "json_trading_decision":    '"action"',
+    "json_cot_answer":          '"cot"',
+    "json_options":             '"greeks"',
+    "xml_final_answer":         "<FINAL_ANSWER>",
+    "csv_data_integration":     None,   # too hard to validate — skip normalization
+    "portfolio_allocation":     None,   # free-form OK — skip normalization
+    "json_generic":             "{",    # any JSON object has { — normalize if missing
+}
+
+
+def _quick_format_check(answer: str, format_key: str) -> bool:
+    """Return True if the answer already has the correct format marker."""
+    marker = _FORMAT_ALREADY_OK.get(format_key)
+    if marker is None:
+        return True   # formats with no marker: leave as-is
+    return marker in answer
+
+
+async def _normalize_to_format(
+    answer: str,
+    format_key: str,
+    task_text: str,
+) -> str | None:
+    """
+    Force the answer into the required output shape using a fast Haiku call.
+    Called LAST — after MoA/reflection/compute verifier — to recover from
+    cases where those passes rewrote a correctly-formatted answer into prose.
+
+    Returns the normalized string, or None if already correct / normalization failed.
+    """
+    import re as _re
+
+    if _quick_format_check(answer, format_key):
+        return None   # already correct — don't touch
+
+    # ── Special case: XML FINAL_ANSWER — extract number, no API cost ──────────
+    if format_key == "xml_final_answer":
+        # Strip commas then find all numbers in the answer
+        clean = answer.replace(",", "")
+        nums = _re.findall(r'\b\d+\.?\d*\b', clean)
+        if nums:
+            # Use last standalone number (most likely the final computed value)
+            return f"<FINAL_ANSWER>\n{nums[-1]}\n</FINAL_ANSWER>"
+        return None
+
+    # ── JSON formats: use Haiku to extract + reformat ─────────────────────────
+    template = _FORMAT_TEMPLATES.get(format_key)
+    if not template:
+        return None   # csv_data_integration, portfolio_allocation
+
+    # json_generic: extract the template structure from the task text itself.
+    # Task text always contains "Return JSON: {...}" from the green agent.
+    if template == "__from_task__":
+        _m = _re.search(
+            r'(?:Return|provide|answer as)\s+JSON[:\s]+(\{[^\n]{10,}?\})',
+            task_text, _re.IGNORECASE | _re.DOTALL
+        )
+        template = _m.group(1).strip() if _m else '{"answer": "your computed result here"}'
+
+    try:
+        import anthropic as _ant
+        _client = _ant.AsyncAnthropic(api_key=_ANTHROPIC_API_KEY)
+        _haiku = MODELS.get("haiku", "claude-haiku-4-5")
+
+        _prompt = (
+            f"Extract the computed answer from the SOURCE TEXT and return it "
+            f"in EXACTLY this JSON format — nothing else:\n\n"
+            f"{template}\n\n"
+            f"Rules:\n"
+            f"• Return ONLY the JSON object — no markdown fences, no prose, no explanation\n"
+            f"• Preserve all numerical values exactly as computed in the source\n"
+            f"• For action fields use exactly: BUY, SELL, HOLD, or CLOSE\n"
+            f"• If a field is missing from the source, use a reasonable default\n\n"
+            f"SOURCE TEXT:\n{answer[:3000]}"
+        )
+
+        _msg = await _client.messages.create(
+            model=_haiku,
+            max_tokens=512,
+            messages=[{"role": "user", "content": _prompt}],
+        )
+        raw = _msg.content[0].text.strip() if _msg.content else ""
+
+        # Strip markdown code fences if model wraps output
+        if raw.startswith("```"):
+            _lines = raw.split("\n")
+            _inner = _lines[1:-1] if _lines and _lines[-1].strip() == "```" else _lines[1:]
+            raw = "\n".join(_inner).strip()
+            if raw.startswith("json"):
+                raw = raw[4:].strip()
+
+        # Validate it starts like JSON
+        if raw.startswith("{") or raw.startswith("["):
+            return raw
+
+        return None
+
+    except Exception:
+        return None
+
+
 class MiniAIWorker:
     """
     Finance Mini AI Worker for AgentX-AgentBeats Phase 2 — Finance Track.
@@ -197,6 +329,19 @@ class MiniAIWorker:
                         pass  # never block execution
             except Exception:
                 pass
+
+        # ── Deduplicate tools by name ──────────────────────────────────────────
+        # Claude API returns 400 "Tool names must be unique" if there are any dupes.
+        # This happens when MCP tools + seeded tools + ACE-synthesized tools overlap
+        # across multiple benchmark sessions (accumulated registry).
+        _seen_names: set[str] = set()
+        _deduped: list[dict] = []
+        for _t in self._tools:
+            _n = _t.get("name", "")
+            if _n and _n not in _seen_names:
+                _seen_names.add(_n)
+                _deduped.append(_t)
+        self._tools = _deduped
 
         # Knowledge base + entity memory injection
         kb_context = get_relevant_knowledge(task_text, fsm.process_type)
@@ -342,6 +487,16 @@ class MiniAIWorker:
                                             "description": rec.description,
                                             "input_schema": rec.input_schema,
                                         })
+                                # Fix 3: dedup again — ACE newly-synthesized tools may overlap
+                                # with seeded tools already in self._tools
+                                _seen2: set[str] = set()
+                                _deduped2: list[dict] = []
+                                for _t2 in self._tools:
+                                    _n2 = _t2.get("name", "")
+                                    if _n2 and _n2 not in _seen2:
+                                        _seen2.add(_n2)
+                                        _deduped2.append(_t2)
+                                self._tools = _deduped2
                         except Exception:
                             pass  # never block for ACE failures
 
@@ -495,6 +650,18 @@ class MiniAIWorker:
                     answer = moa_answer
             except Exception:
                 pass
+
+        # ── Fix 2: Format normalization — enforce required output shape ─────────
+        # MUST run LAST — MoA/reflection can rewrite a correctly-formatted answer
+        # back into prose. This step re-extracts and re-wraps into required JSON/XML.
+        _fmt_key = context.get("format_key")
+        if _fmt_key and answer and not error and not self.budget.should_skip_llm:
+            try:
+                _normalized = await _normalize_to_format(answer, _fmt_key, task_text)
+                if _normalized and len(_normalized) >= 10:
+                    answer = _normalized
+            except Exception:
+                pass   # keep original on normalization failure — never crash execution
 
         return answer, tool_count, error
 
