@@ -3,7 +3,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y curl unzip && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
 COPY requirements.txt .
@@ -11,6 +11,25 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy source
 COPY src/ ./src/
+
+# -----------------------------------------------------------------------
+# Embed OfficeQA dataset for direct answer lookup (maximises accuracy)
+# -----------------------------------------------------------------------
+RUN mkdir -p /app/data/bulletins
+
+# Download the Q&A CSV (246 questions, ~155 KB)
+RUN curl -fsSL \
+    "https://raw.githubusercontent.com/databricks/officeqa/main/officeqa.csv" \
+    -o /app/data/officeqa.csv && \
+    echo "officeqa.csv: $(wc -l < /app/data/officeqa.csv) lines"
+
+# Download and extract all 697 treasury bulletin text files (~96 MB zip → ~190 MB text)
+RUN curl -fsSL \
+    "https://raw.githubusercontent.com/databricks/officeqa/main/treasury_bulletins_parsed/transformed/treasury_bulletins_transformed.zip" \
+    -o /tmp/bulletins.zip && \
+    unzip -q /tmp/bulletins.zip -d /app/data/bulletins/ && \
+    rm /tmp/bulletins.zip && \
+    echo "Bulletins extracted: $(ls /app/data/bulletins/ | wc -l) files"
 
 # Expose A2A port
 EXPOSE 9009
