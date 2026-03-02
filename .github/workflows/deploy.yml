@@ -1,0 +1,72 @@
+name: Deploy Finance Agent
+
+# Finance Mini AI Worker — AgentX Phase 2 Finance Track competition entry.
+# Builds Docker image, pushes to public ECR for benchmark submission.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'main.py'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - '.github/workflows/deploy.yml'
+
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  PUBLIC_ECR_REGISTRY: public.ecr.aws/d9m7h3k5
+  PUBLIC_ECR_REPO: agentbench-finance
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # ─────────────────────────────────────────────
+  # JOB 1: Build + push Docker image
+  # ─────────────────────────────────────────────
+  build:
+    name: Build + Push Image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::848269696611:role/agentbench-github-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to public ECR
+        run: |
+          aws ecr-public get-login-password --region us-east-1 \
+            | docker login --username AWS --password-stdin public.ecr.aws
+          echo "✅ Logged in to public ECR"
+
+      - name: Build Docker image
+        run: |
+          docker build --no-cache --platform linux/amd64 \
+            -t ${{ env.PUBLIC_ECR_REPO }}:latest .
+          echo "✅ Image built: ${{ env.PUBLIC_ECR_REPO }}:latest"
+
+      - name: Push to public ECR (competition submission)
+        run: |
+          docker tag ${{ env.PUBLIC_ECR_REPO }}:latest \
+            ${{ env.PUBLIC_ECR_REGISTRY }}/${{ env.PUBLIC_ECR_REPO }}:latest
+          docker push ${{ env.PUBLIC_ECR_REGISTRY }}/${{ env.PUBLIC_ECR_REPO }}:latest
+          echo "✅ Pushed: public.ecr.aws/d9m7h3k5/agentbench-finance:latest"
+
+      - name: Summary
+        run: |
+          echo "### Finance Agent Docker Image" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "docker pull public.ecr.aws/d9m7h3k5/agentbench-finance:latest" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Submission Docker Image:** \`public.ecr.aws/d9m7h3k5/agentbench-finance:latest\`" >> $GITHUB_STEP_SUMMARY
