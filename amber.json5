@@ -1,0 +1,18 @@
+{
+  manifest_version: "0.1.0",
+  program: {
+    image: "public.ecr.aws/d9m7h3k5/agentbench-finance-a2a:latest",
+    network: {
+      endpoints: [
+        { name: "endpoint", port: 9010 },
+      ],
+    },
+  },
+  slots: {
+    green_agent: { kind: "a2a" },
+  },
+  provides: {
+    a2a: { kind: "a2a", endpoint: "endpoint" },
+  },
+  exports: { a2a: "a2a" },
+}
