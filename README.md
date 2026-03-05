@@ -1,6 +1,12 @@
-# Finance Mini AI Worker
+# Finance AI Worker
 
-An autonomous finance AI worker that executes SEC filing analysis, options pricing, crypto trading decisions, Treasury QA, and portfolio optimization via a dynamic finite state machine, Autonomous Capability Engine (ACE), and a format-compliance post-processor tuned to the AgentX-AgentBeats Finance benchmark.
+> One of four **mini AI workers built on BrainOS** — the Reflexive Agent Architecture framework that achieved **3/3 (100%)** on τ²-Bench. Each worker is a lightweight, self-contained cognitive unit that runs the same PRIME → EXECUTE → REFLECT loop tuned to its domain.
+
+**AgentX Phase 2 — Finance Agent Track**
+
+---
+
+An autonomous finance AI worker built on **BrainOS** that executes SEC filing analysis, options pricing, crypto trading decisions, Treasury QA, and portfolio optimization via a dynamic finite state machine, Autonomous Capability Engine (ACE), and a format-compliance post-processor tuned to the AgentX-AgentBeats Finance benchmark.
 
 ## Overview
 
