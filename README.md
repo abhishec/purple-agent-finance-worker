@@ -199,7 +199,11 @@ docker run -e ANTHROPIC_API_KEY=sk-ant-... \
 - **FSM:** Dynamic finance FSM with ACE capability synthesis
 - **Format compliance:** Zero-API regex detection + Haiku normalization post-processor
 - **Numerics:** scipy · numpy · sympy in ACE-synthesized tool sandbox
-- **Core library:** [brainos-core-light](https://github.com/abhishec/brainoscorelight) — shared primitives (Brain, Router, UCB1, RL)
+- **Core library:** [brainos-core-light](https://github.com/abhishec/brainoscorelight) v0.3.0
+  - `DAAO` — zero-LLM model routing (Haiku classification/normalization, Sonnet ANALYZE/COMPUTE)
+  - `DepthContract` — depth retry for shallow numeric answers
+  - `Brain` + `Router` — UCB1 strategy bandit + 5-layer memory
+  - `PrivacyGuard` — PII detection before any API call
 - **RL:** UCB1 bandit · case log · quality scoring · knowledge extraction
 - **Protocol:** A2A JSON-RPC 2.0
 
