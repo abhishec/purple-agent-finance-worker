@@ -195,10 +195,11 @@ docker run -e ANTHROPIC_API_KEY=sk-ant-... \
 ## Tech Stack
 
 - **Runtime:** Python 3.12 · FastAPI · uvicorn
-- **LLM:** Claude Haiku (classification, synthesis, normalization) · Sonnet (ANALYZE, COMPUTE)
+- **LLM:** claude-haiku-4-5-20251001 (classification, synthesis, normalization) · claude-sonnet-4-6 (ANALYZE, COMPUTE)
 - **FSM:** Dynamic finance FSM with ACE capability synthesis
 - **Format compliance:** Zero-API regex detection + Haiku normalization post-processor
 - **Numerics:** scipy · numpy · sympy in ACE-synthesized tool sandbox
+- **Core library:** [brainos-core-light](https://github.com/abhishec/brainoscorelight) — shared primitives (Brain, Router, UCB1, RL)
 - **RL:** UCB1 bandit · case log · quality scoring · knowledge extraction
 - **Protocol:** A2A JSON-RPC 2.0
 
