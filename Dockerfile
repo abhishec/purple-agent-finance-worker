@@ -11,6 +11,9 @@ RUN chown agentbeats:agentbeats /app
 
 COPY --chown=agentbeats:agentbeats requirements.txt .
 
+# git is required by pip to install git+https:// dependencies (brainos-core-light)
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+
 # Install scipy/numpy/pandas before other deps — larger packages, benefit from layer caching
 RUN pip install --no-cache-dir scipy numpy pandas sympy && \
     pip install --no-cache-dir -r requirements.txt
